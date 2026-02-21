@@ -128,6 +128,7 @@ export class ShellComponent {
     { path: '/settings',       label: 'Settings',     icon: 'settings' },
     { path: '/inspector',      label: 'Inspector',    icon: 'storage' },
     { path: '/lot-normalizer', label: 'Lot Normalizer', icon: 'join_inner' },
-    { path: '/validation',     label: 'Validation',    icon: 'rule' },
+    { path: '/validation',        label: 'Validation',      icon: 'rule' },
+    { path: '/template-mapping', label: 'Template Mapping', icon: 'table_view' },
   ];
 }

@@ -51,6 +51,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./pages/validation/validation.component').then(m => m.ValidationComponent),
       },
+      {
+        path: 'template-mapping',
+        loadComponent: () =>
+          import('./pages/template-mapping/template-mapping.component').then(m => m.TemplateMappingComponent),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

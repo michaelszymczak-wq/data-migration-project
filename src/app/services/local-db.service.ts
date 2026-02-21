@@ -1,9 +1,9 @@
 import { Injectable } from '@angular/core';
 import { openDB, IDBPDatabase } from 'idb';
-import { Workspace, RawFile, Classification, ParseResult, Mapping, StagedRecord, Category, NormalizedLotComposition, ValidationRule } from '../models';
+import { Workspace, RawFile, Classification, ParseResult, Mapping, StagedRecord, Category, NormalizedLotComposition, ValidationRule, TemplateSpec, TemplateMapping, GeneratedSheetPreview } from '../models';
 
 const DB_NAME = 'migration-poc';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 @Injectable({ providedIn: 'root' })
 export class LocalDbService {
@@ -59,6 +59,19 @@ export class LocalDbService {
           const vr = db.createObjectStore('validationRules', { keyPath: 'id' });
           vr.createIndex('workspaceId', 'workspaceId');
           vr.createIndex('category',    'category');
+        }
+
+        // ── Version 6 stores ───────────────────────────────────────────────────
+        if (oldVersion < 6) {
+          // Template specs are workspace-agnostic (not deleted per workspace)
+          db.createObjectStore('templateSpecs', { keyPath: 'id' });
+
+          // Mappings and previews are per workspace
+          const tm = db.createObjectStore('templateMappings', { keyPath: 'id' });
+          tm.createIndex('workspaceId', 'workspaceId');
+
+          const gp = db.createObjectStore('generatedSheetPreviews', { keyPath: 'id' });
+          gp.createIndex('workspaceId', 'workspaceId');
         }
       },
     });
@@ -243,6 +256,44 @@ export class LocalDbService {
     await tx.done;
   }
 
+  // ── TemplateSpecs ────────────────────────────────────────────────────────────
+
+  async listTemplateSpecs(): Promise<TemplateSpec[]> {
+    return (await this.db()).getAll('templateSpecs');
+  }
+
+  async putTemplateSpec(spec: TemplateSpec): Promise<void> {
+    await (await this.db()).put('templateSpecs', spec);
+  }
+
+  // ── TemplateMappings ─────────────────────────────────────────────────────────
+
+  async getTemplateMapping(workspaceId: string, templateId: string, sheetName: string): Promise<TemplateMapping | undefined> {
+    return (await this.db()).get('templateMappings', `${workspaceId}:${templateId}:${sheetName}`);
+  }
+
+  async listTemplateMappingsByWorkspace(workspaceId: string): Promise<TemplateMapping[]> {
+    return (await this.db()).getAllFromIndex('templateMappings', 'workspaceId', workspaceId);
+  }
+
+  async putTemplateMapping(mapping: TemplateMapping): Promise<void> {
+    await (await this.db()).put('templateMappings', mapping);
+  }
+
+  // ── GeneratedSheetPreviews ───────────────────────────────────────────────────
+
+  async getGeneratedSheetPreview(workspaceId: string, templateId: string, sheetName: string): Promise<GeneratedSheetPreview | undefined> {
+    return (await this.db()).get('generatedSheetPreviews', `${workspaceId}:${templateId}:${sheetName}`);
+  }
+
+  async putGeneratedSheetPreview(preview: GeneratedSheetPreview): Promise<void> {
+    await (await this.db()).put('generatedSheetPreviews', preview);
+  }
+
+  async listGeneratedSheetPreviewsByWorkspace(workspaceId: string): Promise<GeneratedSheetPreview[]> {
+    return (await this.db()).getAllFromIndex('generatedSheetPreviews', 'workspaceId', workspaceId);
+  }
+
   // ── Housekeeping ────────────────────────────────────────────────────────────
 
   /**
@@ -259,27 +310,35 @@ export class LocalDbService {
       this.listNormalizedByWorkspace(workspaceId),
     ]);
 
-    const rules = await this.listValidationRulesByWorkspace(workspaceId);
+    const [rules, tmMappings, previews] = await Promise.all([
+      this.listValidationRulesByWorkspace(workspaceId),
+      this.listTemplateMappingsByWorkspace(workspaceId),
+      this.listGeneratedSheetPreviewsByWorkspace(workspaceId),
+    ]);
 
     const db = await this.db();
     const tx = db.transaction(
-      ['rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions', 'validationRules'],
+      ['rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords',
+       'normalizedLotCompositions', 'validationRules', 'templateMappings', 'generatedSheetPreviews'],
       'readwrite',
     );
-    files.forEach(f    => tx.objectStore('rawFiles').delete(f.id));
-    cls.forEach(c      => tx.objectStore('classifications').delete(c.fileId));
-    prs.forEach(p      => tx.objectStore('parseResults').delete(p.fileId));
-    maps.forEach(m     => tx.objectStore('mappings').delete([m.workspaceId, m.category]));
-    staged.forEach(s   => tx.objectStore('stagedRecords').delete(s.id));
+    files.forEach(f      => tx.objectStore('rawFiles').delete(f.id));
+    cls.forEach(c        => tx.objectStore('classifications').delete(c.fileId));
+    prs.forEach(p        => tx.objectStore('parseResults').delete(p.fileId));
+    maps.forEach(m       => tx.objectStore('mappings').delete([m.workspaceId, m.category]));
+    staged.forEach(s     => tx.objectStore('stagedRecords').delete(s.id));
     normalized.forEach(n => tx.objectStore('normalizedLotCompositions').delete(n.id));
-    rules.forEach(r    => tx.objectStore('validationRules').delete(r.id));
+    rules.forEach(r      => tx.objectStore('validationRules').delete(r.id));
+    tmMappings.forEach(m => tx.objectStore('templateMappings').delete(m.id));
+    previews.forEach(p   => tx.objectStore('generatedSheetPreviews').delete(p.id));
     await tx.done;
   }
 
   async clearAll(): Promise<void> {
     const db = await this.db();
     const tx = db.transaction(
-      ['workspaces', 'rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions', 'validationRules'],
+      ['workspaces', 'rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords',
+       'normalizedLotCompositions', 'validationRules', 'templateSpecs', 'templateMappings', 'generatedSheetPreviews'],
       'readwrite'
     );
     await Promise.all([
@@ -291,6 +350,9 @@ export class LocalDbService {
       tx.objectStore('stagedRecords').clear(),
       tx.objectStore('normalizedLotCompositions').clear(),
       tx.objectStore('validationRules').clear(),
+      tx.objectStore('templateSpecs').clear(),
+      tx.objectStore('templateMappings').clear(),
+      tx.objectStore('generatedSheetPreviews').clear(),
     ]);
     await tx.done;
   }

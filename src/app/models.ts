@@ -113,6 +113,48 @@ export interface ValidationIssue {
   severity: 'error' | 'warning';
 }
 
+// ─── Template Mapping ─────────────────────────────────────────────────────────
+
+export type MappingSourceKind = 'constant' | 'field' | 'expression';
+
+export interface MappingRule {
+  targetColumn: string;
+  sourceKind: MappingSourceKind | '';
+  sourceValue: string;  // field path like 'lotComposition.lotCode', literal, or expression
+  required?: boolean;
+}
+
+export interface TemplateSpec {
+  id: string;
+  name: string;
+  importedAt: string;
+  sheets: Array<{ sheetName: string; headers: string[] }>;
+  source: 'bundled' | 'uploaded';
+  rawBlob?: Blob;  // stored in IndexedDB; needed to generate filled XLSX
+}
+
+export interface TemplateMapping {
+  id: string;  // `${workspaceId}:${templateId}:${sheetName}`
+  workspaceId: string;
+  templateId: string;
+  sheetName: string;
+  rules: MappingRule[];
+  updatedAt: string;
+}
+
+export interface GeneratedSheetPreview {
+  id: string;  // `${workspaceId}:${templateId}:${sheetName}`
+  workspaceId: string;
+  templateId: string;
+  sheetName: string;
+  rowCount: number;
+  previewRows: Record<string, unknown>[];
+  errors: string[];
+  generatedAt: string;
+}
+
+// ─── Normalized Lot Composition ───────────────────────────────────────────────
+
 export interface NormalizedLotComposition {
   id: string;
   workspaceId: string;
