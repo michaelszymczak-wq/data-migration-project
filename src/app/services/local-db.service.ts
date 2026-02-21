@@ -1,9 +1,9 @@
 import { Injectable } from '@angular/core';
 import { openDB, IDBPDatabase } from 'idb';
-import { Workspace, RawFile, Classification, ParseResult, Mapping, StagedRecord, Category, NormalizedLotComposition } from '../models';
+import { Workspace, RawFile, Classification, ParseResult, Mapping, StagedRecord, Category, NormalizedLotComposition, ValidationRule } from '../models';
 
 const DB_NAME = 'migration-poc';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 @Injectable({ providedIn: 'root' })
 export class LocalDbService {
@@ -52,6 +52,13 @@ export class LocalDbService {
           nl.createIndex('workspaceId',  'workspaceId');
           nl.createIndex('sourceFileId', 'sourceFileId');
           nl.createIndex('lotCode',      'lotCode');
+        }
+
+        // ── Version 5 stores ───────────────────────────────────────────────────
+        if (oldVersion < 5) {
+          const vr = db.createObjectStore('validationRules', { keyPath: 'id' });
+          vr.createIndex('workspaceId', 'workspaceId');
+          vr.createIndex('category',    'category');
         }
       },
     });
@@ -207,6 +214,26 @@ export class LocalDbService {
     await tx.done;
   }
 
+  // ── ValidationRules ──────────────────────────────────────────────────────────
+
+  async listValidationRulesByWorkspace(workspaceId: string): Promise<ValidationRule[]> {
+    const db = await this.db();
+    return db.getAllFromIndex('validationRules', 'workspaceId', workspaceId);
+  }
+
+  async listValidationRulesByCategory(workspaceId: string, category: string): Promise<ValidationRule[]> {
+    const all = await this.listValidationRulesByWorkspace(workspaceId);
+    return all.filter(r => r.category === category);
+  }
+
+  async putValidationRule(rule: ValidationRule): Promise<void> {
+    await (await this.db()).put('validationRules', rule);
+  }
+
+  async deleteValidationRule(id: string): Promise<void> {
+    await (await this.db()).delete('validationRules', id);
+  }
+
   async deleteNormalizedByFile(sourceFileId: string): Promise<void> {
     const db = await this.db();
     const keys = await db.getAllKeysFromIndex('normalizedLotCompositions', 'sourceFileId', sourceFileId);
@@ -232,9 +259,11 @@ export class LocalDbService {
       this.listNormalizedByWorkspace(workspaceId),
     ]);
 
+    const rules = await this.listValidationRulesByWorkspace(workspaceId);
+
     const db = await this.db();
     const tx = db.transaction(
-      ['rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions'],
+      ['rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions', 'validationRules'],
       'readwrite',
     );
     files.forEach(f    => tx.objectStore('rawFiles').delete(f.id));
@@ -243,13 +272,14 @@ export class LocalDbService {
     maps.forEach(m     => tx.objectStore('mappings').delete([m.workspaceId, m.category]));
     staged.forEach(s   => tx.objectStore('stagedRecords').delete(s.id));
     normalized.forEach(n => tx.objectStore('normalizedLotCompositions').delete(n.id));
+    rules.forEach(r    => tx.objectStore('validationRules').delete(r.id));
     await tx.done;
   }
 
   async clearAll(): Promise<void> {
     const db = await this.db();
     const tx = db.transaction(
-      ['workspaces', 'rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions'],
+      ['workspaces', 'rawFiles', 'classifications', 'parseResults', 'mappings', 'stagedRecords', 'normalizedLotCompositions', 'validationRules'],
       'readwrite'
     );
     await Promise.all([
@@ -260,6 +290,7 @@ export class LocalDbService {
       tx.objectStore('mappings').clear(),
       tx.objectStore('stagedRecords').clear(),
       tx.objectStore('normalizedLotCompositions').clear(),
+      tx.objectStore('validationRules').clear(),
     ]);
     await tx.done;
   }

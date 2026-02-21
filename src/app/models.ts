@@ -75,7 +75,42 @@ export interface StagedRecord {
   sourceFileId: string;
   data: Record<string, unknown>; // targetKey → coerced value
   errors: string[];
+  validationIssues?: ValidationIssue[]; // populated after validation run
   createdAt: string;
+}
+
+// ─── Validation ────────────────────────────────────────────────────────────────
+
+export type ValidationRuleType = 'required' | 'range' | 'pattern' | 'no_future_date' | 'unique';
+
+export interface ValidationRuleParams {
+  min?: number;          // for 'range'
+  max?: number;          // for 'range'
+  pattern?: string;      // for 'pattern' (regex string)
+  patternHint?: string;  // human-readable description of the pattern
+}
+
+export interface ValidationRule {
+  id: string;
+  workspaceId: string;
+  category: Category;
+  name: string;
+  field: string;                   // target schema field key
+  type: ValidationRuleType;
+  params: ValidationRuleParams;
+  severity: 'error' | 'warning';
+  builtIn: boolean;                // built-in rules cannot be deleted
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface ValidationIssue {
+  ruleId: string;
+  ruleName: string;
+  field: string;
+  value: unknown;
+  message: string;
+  severity: 'error' | 'warning';
 }
 
 export interface NormalizedLotComposition {

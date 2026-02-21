@@ -46,6 +46,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./pages/lot-normalizer/lot-normalizer.component').then(m => m.LotNormalizerComponent),
       },
+      {
+        path: 'validation',
+        loadComponent: () =>
+          import('./pages/validation/validation.component').then(m => m.ValidationComponent),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

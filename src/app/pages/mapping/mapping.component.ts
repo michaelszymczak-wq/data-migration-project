@@ -11,6 +11,7 @@ import { LocalDbService } from '../../services/local-db.service';
 import { TargetSchemaService } from '../../services/target-schema.service';
 import { TransformService } from '../../services/transform.service';
 import { CATEGORY_COLOR } from '../../services/classifier.service';
+import { ValidationRulesService, builtInRulesFor } from '../../services/validation-rules.service';
 import { ToastService } from '../../services/toast.service';
 import { WorkflowStatusService } from '../../services/workflow-status.service';
 import { NoWorkspaceComponent } from '../../shared/no-workspace.component';
@@ -29,6 +30,7 @@ interface FileRecord {
 interface StagingResult {
   totalRecords: number;
   errorCount: number;
+  validationIssueCount: number;
   preview: StagedRecord[];
 }
 
@@ -187,12 +189,19 @@ const PREVIEW_LIMIT = 20;
                         @if (stagingResult()!.errorCount > 0) {
                           <span class="stat-chip stat-err">
                             <mat-icon inline>error_outline</mat-icon>
-                            {{ stagingResult()!.errorCount | number }} with errors
+                            {{ stagingResult()!.errorCount | number }} transform errors
                           </span>
-                        } @else {
+                        }
+                        @if (stagingResult()!.validationIssueCount > 0) {
+                          <span class="stat-chip stat-warn">
+                            <mat-icon inline>warning_amber</mat-icon>
+                            {{ stagingResult()!.validationIssueCount | number }} validation issues
+                          </span>
+                        }
+                        @if (stagingResult()!.errorCount === 0 && stagingResult()!.validationIssueCount === 0) {
                           <span class="stat-chip stat-ok">
                             <mat-icon inline>check_circle_outline</mat-icon>
-                            No errors
+                            All clean
                           </span>
                         }
                         <span class="stat-chip stat-info">
@@ -445,6 +454,7 @@ const PREVIEW_LIMIT = 20;
 
     .stat-total { background: #e8eaf6; color: #3f51b5; }
     .stat-err   { background: #ffebee; color: #c62828; }
+    .stat-warn  { background: #fff3e0; color: #e65100; }
     .stat-ok    { background: #e8f5e9; color: #2e7d32; }
     .stat-info  { background: #f5f5f5; color: rgba(0,0,0,0.5); }
 
@@ -500,6 +510,7 @@ export class MappingComponent {
   db           = inject(LocalDbService);
   targetSchema = inject(TargetSchemaService);
   transformer  = inject(TransformService);
+  private validator = inject(ValidationRulesService);
   private toast    = inject(ToastService);
   private wfStatus = inject(WorkflowStatusService);
 
@@ -661,26 +672,33 @@ export class MappingComponent {
       await this.db.deleteStagedByFile(file.file.id);
 
       // Transform ALL rows (re-parses raw content if available)
-      const records = await this.transformer.transformFile(
+      const raw = await this.transformer.transformFile(
         file.file,
         file.parse.previewRows,
         mapping,
         fields,
       );
 
+      // Run validation (built-in + any custom rules for this workspace + category)
+      const customRules = await this.db.listValidationRulesByCategory(wsId, file.classification.category);
+      const allRules    = [...builtInRulesFor(file.classification.category), ...customRules];
+      const records     = this.validator.validateRecords(raw, allRules);
+
       // Bulk-persist to IndexedDB
       await this.db.putStagedRecords(records);
 
-      const errorCount = records.filter(r => r.errors.length > 0).length;
+      const errorCount           = records.filter(r => r.errors.length > 0).length;
+      const validationIssueCount = records.filter(r => (r.validationIssues?.length ?? 0) > 0).length;
       this.stagingResult.set({
         totalRecords: records.length,
         errorCount,
+        validationIssueCount,
         preview: records.slice(0, PREVIEW_LIMIT),
       });
-      const msg = errorCount > 0
-        ? `${records.length} records staged (${errorCount} with errors)`
-        : `${records.length} records staged — no errors`;
-      this.toast.success(msg);
+      const parts: string[] = [`${records.length} records staged`];
+      if (errorCount)           parts.push(`${errorCount} transform error${errorCount > 1 ? 's' : ''}`);
+      if (validationIssueCount) parts.push(`${validationIssueCount} validation issue${validationIssueCount > 1 ? 's' : ''}`);
+      this.toast.success(parts.join(' · '));
       this.wfStatus.refresh();
     } finally {
       this.isGenerating.set(false);
