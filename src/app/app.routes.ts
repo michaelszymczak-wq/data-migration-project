@@ -56,6 +56,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./pages/template-mapping/template-mapping.component').then(m => m.TemplateMappingComponent),
       },
+      {
+        path: 'vessel-mapper',
+        loadComponent: () =>
+          import('./pages/vessel-mapper/vessel-mapper.component').then(m => m.VesselMapperComponent),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

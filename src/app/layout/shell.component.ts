@@ -130,5 +130,6 @@ export class ShellComponent {
     { path: '/lot-normalizer', label: 'Lot Normalizer', icon: 'join_inner' },
     { path: '/validation',        label: 'Validation',      icon: 'rule' },
     { path: '/template-mapping', label: 'Template Mapping', icon: 'table_view' },
+    { path: '/vessel-mapper',    label: 'Vessel Mapper',    icon: 'transform' },
   ];
 }
