@@ -14,6 +14,9 @@ import { CATEGORY_COLOR } from '../../services/classifier.service';
 import { ValidationRulesService, builtInRulesFor } from '../../services/validation-rules.service';
 import { ToastService } from '../../services/toast.service';
 import { WorkflowStatusService } from '../../services/workflow-status.service';
+import { AiSettingsService } from '../../services/ai-settings.service';
+import { ClaudeService, describeClaudeError } from '../../services/claude.service';
+import { applyCleanup, CleanupRowProposal } from '../../services/claude.util';
 import { NoWorkspaceComponent } from '../../shared/no-workspace.component';
 import { MappingEditorComponent } from './mapping-editor.component';
 import {
@@ -132,6 +135,19 @@ const PREVIEW_LIMIT = 20;
                           [style.background]="catColor(selectedFile()!.classification.category)">
                       {{ selectedFile()!.classification.category }}
                     </span>
+                    <span class="spacer"></span>
+                    <button mat-stroked-button
+                            class="ai-btn"
+                            [disabled]="!ai.hasKey() || isSuggesting()"
+                            (click)="suggestMapping()"
+                            [matTooltip]="ai.hasKey() ? 'Let Claude propose the column mapping' : 'Add your Claude API key in Settings'">
+                      @if (isSuggesting()) {
+                        <mat-spinner diameter="16" style="display:inline-block;margin-right:6px" />
+                        Asking Claude…
+                      } @else {
+                        <mat-icon>smart_toy</mat-icon> Suggest with Claude
+                      }
+                    </button>
                   </div>
                   <p class="scope-note">
                     <mat-icon inline>info_outline</mat-icon>
@@ -158,6 +174,20 @@ const PREVIEW_LIMIT = 20;
                     <div class="staging-header">
                       <h4>Staging Preview</h4>
                       <span class="spacer"></span>
+                      @if (stagingResult() && !cleanupResult()) {
+                        <button mat-stroked-button
+                                class="ai-btn"
+                                [disabled]="!ai.hasKey() || isCleaning()"
+                                (click)="runCleanup()"
+                                [matTooltip]="ai.hasKey() ? 'Let Claude clean up the shown values' : 'Add your Claude API key in Settings'">
+                          @if (isCleaning()) {
+                            <mat-spinner diameter="16" style="display:inline-block;margin-right:6px" />
+                            Cleaning…
+                          } @else {
+                            <mat-icon>auto_fix_high</mat-icon> AI cleanup
+                          }
+                        </button>
+                      }
                       <button mat-raised-button
                               color="accent"
                               [disabled]="!hasSavedMappingForFile() || isGenerating()"
@@ -172,6 +202,21 @@ const PREVIEW_LIMIT = 20;
                         }
                       </button>
                     </div>
+
+                    <!-- AI cleanup review banner -->
+                    @if (cleanupResult(); as cu) {
+                      <div class="cleanup-banner">
+                        <mat-icon>auto_fix_high</mat-icon>
+                        <span>Claude proposed <strong>{{ cu.changedCount }}</strong>
+                          change{{ cu.changedCount > 1 ? 's' : '' }} across the shown rows
+                          (highlighted below). Review, then apply.</span>
+                        <span class="spacer"></span>
+                        <button mat-button (click)="discardCleanup()">Discard</button>
+                        <button mat-raised-button color="primary" (click)="acceptCleanup()">
+                          <mat-icon>check</mat-icon> Accept changes
+                        </button>
+                      </div>
+                    }
 
                     @if (!hasSavedMappingForFile()) {
                       <p class="staging-hint">
@@ -221,7 +266,7 @@ const PREVIEW_LIMIT = 20;
                             </tr>
                           </thead>
                           <tbody>
-                            @for (rec of stagingResult()!.preview; track rec.id) {
+                            @for (rec of displayRows(); track rec.id) {
                               <tr [class.staged-row-err]="rec.errors.length > 0">
                                 <td class="status-col">
                                   @if (rec.errors.length > 0) {
@@ -234,7 +279,10 @@ const PREVIEW_LIMIT = 20;
                                   }
                                 </td>
                                 @for (f of targetFields(); track f.key) {
-                                  <td [class.cell-null]="rec.data[f.key] === null">
+                                  <td [class.cell-null]="rec.data[f.key] === null"
+                                      [class.cell-cleaned]="cellReason(rec.id, f.key)"
+                                      [matTooltip]="cellReason(rec.id, f.key) || ''"
+                                      matTooltipClass="cleaned-tip">
                                     {{ rec.data[f.key] ?? '—' }}
                                   </td>
                                 }
@@ -503,6 +551,31 @@ const PREVIEW_LIMIT = 20;
     .row-ok-icon  { font-size: 16px; color: #43a047; }
 
     .cell-null { color: rgba(0,0,0,0.3); font-style: italic; }
+
+    /* ── AI cleanup ──────────────────────────────────────────── */
+    .ai-btn mat-icon { color: #6c5ce7; }
+
+    .cleanup-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      background: #f3f1fd;
+      border: 1px solid #d6cff5;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #4b3ea0;
+      mat-icon { color: #6c5ce7; }
+    }
+
+    /* Cells Claude changed in the pending-review preview */
+    .cell-cleaned {
+      background: #efecfb !important;
+      box-shadow: inset 3px 0 0 #6c5ce7;
+      font-weight: 600;
+      cursor: help;
+    }
   `],
 })
 export class MappingComponent {
@@ -513,10 +586,21 @@ export class MappingComponent {
   private validator = inject(ValidationRulesService);
   private toast    = inject(ToastService);
   private wfStatus = inject(WorkflowStatusService);
+  readonly ai      = inject(AiSettingsService);
+  private claude   = inject(ClaudeService);
 
   fileRecords   = signal<FileRecord[]>([]);
   selectedFile  = signal<FileRecord | null>(null);
   savedMappings = signal<Map<Category, Mapping>>(new Map());
+
+  isSuggesting = signal(false);
+  isCleaning   = signal(false);
+  // Pending AI cleanup awaiting Accept/Discard: updated preview records + reasons.
+  cleanupResult = signal<{
+    records: StagedRecord[];
+    proposalsById: Map<string, CleanupRowProposal>;
+    changedCount: number;
+  } | null>(null);
 
   // Passed to editor — updated ONLY when loading a new file/mapping (not on every edit)
   editorInitValue = signal<Record<string, string>>({});
@@ -545,6 +629,17 @@ export class MappingComponent {
     const f = this.selectedFile();
     return f ? this.savedMappings().has(f.classification.category) : false;
   });
+
+  // Rows shown in the preview table: the pending cleanup set if any, else staging.
+  displayRows = computed<StagedRecord[]>(() =>
+    this.cleanupResult()?.records ?? this.stagingResult()?.preview ?? []
+  );
+
+  /** The reason Claude gave for changing a cell, or null if unchanged. */
+  cellReason(rowId: string, fieldKey: string): string | null {
+    const field = this.cleanupResult()?.proposalsById.get(rowId)?.fields[fieldKey];
+    return field?.changed ? field.reason : null;
+  }
 
   constructor() {
     effect(() => {
@@ -605,6 +700,7 @@ export class MappingComponent {
     this.selectedFile.set(record);
     this.savedAt.set(null);
     this.stagingResult.set(null);
+    this.cleanupResult.set(null);
 
     const saved = this.savedMappings().get(record.classification.category);
     const init  = saved?.mappings ?? {};
@@ -650,6 +746,7 @@ export class MappingComponent {
     this.currentMapping.set({});
     this.savedAt.set(null);
     this.stagingResult.set(null);
+    this.cleanupResult.set(null);
   }
 
   // ── Generate staging preview ───────────────────────────────────────────────
@@ -666,6 +763,7 @@ export class MappingComponent {
 
     this.isGenerating.set(true);
     this.stagingResult.set(null);
+    this.cleanupResult.set(null);
 
     try {
       // Delete stale staged records for this file first
@@ -703,6 +801,100 @@ export class MappingComponent {
     } finally {
       this.isGenerating.set(false);
     }
+  }
+
+  // ── AI: suggest mapping ──────────────────────────────────────────────────────
+
+  async suggestMapping(): Promise<void> {
+    const file = this.selectedFile();
+    if (!file || !this.ai.hasKey()) return;
+
+    this.isSuggesting.set(true);
+    try {
+      const suggestion = await this.claude.suggestMapping({
+        category:      file.classification.category,
+        targetFields:  this.targetFields(),
+        sourceColumns: this.sourceColumns(),
+        sampleRows:    file.parse.previewRows,
+      });
+      // Merge over current edits, then push into the (controlled) editor.
+      const merged = { ...this.currentMapping(), ...suggestion };
+      this.editorInitValue.set({ ...merged });
+      this.currentMapping.set({ ...merged });
+      this.savedAt.set(null);
+      const n = Object.keys(suggestion).length;
+      this.toast.success(n ? `Claude mapped ${n} field${n > 1 ? 's' : ''} — review and Save.`
+                            : 'Claude found no confident mappings.');
+    } catch (err) {
+      this.toast.error(describeClaudeError(err));
+    } finally {
+      this.isSuggesting.set(false);
+    }
+  }
+
+  // ── AI: cleanup values ───────────────────────────────────────────────────────
+
+  async runCleanup(): Promise<void> {
+    const file = this.selectedFile();
+    const staging = this.stagingResult();
+    if (!file || !staging || !this.ai.hasKey()) return;
+
+    this.isCleaning.set(true);
+    try {
+      const fields = this.targetFields();
+      const proposals = await this.claude.cleanupRecords({
+        category:     file.classification.category,
+        targetFields: fields,
+        records:      staging.preview.map(r => ({ id: r.id, data: r.data })),
+      });
+      const { records, changedCount } = applyCleanup(staging.preview, proposals, fields);
+      if (!changedCount) {
+        this.toast.info('Claude found nothing to clean up in these rows.');
+        return;
+      }
+      this.cleanupResult.set({
+        records,
+        proposalsById: new Map(proposals.map(p => [p.rowId, p])),
+        changedCount,
+      });
+      this.toast.success(`Claude proposed ${changedCount} change${changedCount > 1 ? 's' : ''} — review and Accept.`);
+    } catch (err) {
+      this.toast.error(describeClaudeError(err));
+    } finally {
+      this.isCleaning.set(false);
+    }
+  }
+
+  discardCleanup(): void {
+    this.cleanupResult.set(null);
+  }
+
+  async acceptCleanup(): Promise<void> {
+    const wsId    = this.ws.activeId();
+    const file    = this.selectedFile();
+    const cleanup = this.cleanupResult();
+    if (!wsId || !file || !cleanup) return;
+
+    const category = file.classification.category;
+    // Re-validate the cleaned rows, then persist (same ids overwrite stored records).
+    const customRules = await this.db.listValidationRulesByCategory(wsId, category);
+    const allRules    = [...builtInRulesFor(category), ...customRules];
+    const revalidated = this.validator.validateRecords(cleanup.records, allRules);
+    await this.db.putStagedRecords(revalidated);
+
+    // Recompute full-file stats from storage; keep the cleaned rows as the preview.
+    const all = await this.db.listStagedByFile(file.file.id);
+    const errorCount           = all.filter(r => r.errors.length > 0).length;
+    const validationIssueCount = all.filter(r => (r.validationIssues?.length ?? 0) > 0).length;
+    this.stagingResult.set({
+      totalRecords: all.length,
+      errorCount,
+      validationIssueCount,
+      preview: revalidated,
+    });
+    this.cleanupResult.set(null);
+    this.toast.success(`Applied ${cleanup.changedCount} cleanup change${cleanup.changedCount > 1 ? 's' : ''}.`);
+    this.wfStatus.refresh();
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────

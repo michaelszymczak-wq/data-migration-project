@@ -5,27 +5,45 @@ import { Category, ValidationRule, ValidationIssue, StagedRecord } from '../mode
 // These are always available; users can add custom rules on top.
 
 const BUILT_IN: Omit<ValidationRule, 'id' | 'workspaceId' | 'createdAt'>[] = [
-  // ── Vineyard+block ──────────────────────────────────────────────────────────
-  { category: 'Vineyard+block', name: 'Vineyard Name required',  field: 'vineyardName', type: 'required', params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vineyard+block', name: 'Block Name required',     field: 'blockName',    type: 'required', params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vineyard+block', name: 'Variety required',        field: 'variety',      type: 'required', params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vineyard+block', name: 'Acres in range',          field: 'acres',        type: 'range',    params: { min: 0.001, max: 50000 }, severity: 'warning', builtIn: true, enabled: true },
+  // ── Vineyard+block (InnoVint template) ───────────────────────────────────────
+  { category: 'Vineyard+block', name: 'Vineyard name required', field: 'vineyardName', type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vineyard+block', name: 'Source type required',   field: 'sourceType',   type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vineyard+block', name: 'Appellation required',   field: 'appellation',  type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vineyard+block', name: 'Block name required',    field: 'blockName',    type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vineyard+block', name: 'Variety required',       field: 'variety',      type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vineyard+block', name: 'Area in range',          field: 'area',         type: 'range',    params: { min: 0.001, max: 50000 }, severity: 'warning', builtIn: true, enabled: true },
 
-  // ── Vessel ──────────────────────────────────────────────────────────────────
-  { category: 'Vessel', name: 'Vessel ID required',  field: 'vesselId',   type: 'required', params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vessel', name: 'Type required',        field: 'vesselType', type: 'required', params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vessel', name: 'Vessel ID unique',     field: 'vesselId',   type: 'unique',   params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Vessel', name: 'Capacity in range',    field: 'capacity',   type: 'range',    params: { min: 0.1, max: 1_000_000 }, severity: 'warning', builtIn: true, enabled: true },
+  // ── Vessel (InnoVint template; barrel-only fields enforced in transform) ──────
+  { category: 'Vessel', name: 'Vessel code required',  field: 'vesselCode',  type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vessel', name: 'Vessel type required',  field: 'vesselType',  type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vessel', name: 'Capacity (vol) required', field: 'capacityVol', type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vessel', name: 'Vessel code unique',    field: 'vesselCode',  type: 'unique',   params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Vessel', name: 'Capacity (vol) in range', field: 'capacityVol', type: 'range', params: { min: 0.1, max: 1_000_000 }, severity: 'warning', builtIn: true, enabled: true },
 
-  // ── Lot Composition ─────────────────────────────────────────────────────────
-  { category: 'Lot Composition', name: 'Lot ID required',           field: 'lotId',          type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
-  { category: 'Lot Composition', name: 'Component Lot ID required', field: 'componentLotId', type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
-  { category: 'Lot Composition', name: 'Percent 0-100',             field: 'percent',        type: 'range',    params: { min: 0, max: 100 },   severity: 'error', builtIn: true, enabled: true },
+  // ── Lot Composition (InnoVint "Lot create" template) ─────────────────────────
+  { category: 'Lot Composition', name: 'Bond required',          field: 'bond',          type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Lot code required',      field: 'lotCode',       type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Tax class required',     field: 'taxClass',      type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Stage required',         field: 'stage',         type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Color required',         field: 'color',         type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Style required',         field: 'style',         type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Component type required',field: 'componentType', type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Component % required',   field: 'componentPct',  type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Component % 0-100',      field: 'componentPct',  type: 'range',    params: { min: 0, max: 100 }, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Vineyard required',      field: 'vineyard',      type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Block required',         field: 'block',         type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Vintage required',      field: 'vintage',       type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Varietal required',      field: 'varietal',      type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: 'Appellation required',   field: 'appellation',   type: 'required', params: {}, severity: 'error', builtIn: true, enabled: true },
+  { category: 'Lot Composition', name: '% of Bulk 0-100',        field: 'pctOfBulk',     type: 'range',    params: { min: 0, max: 100 }, severity: 'warning', builtIn: true, enabled: true },
 
-  // ── Volume ──────────────────────────────────────────────────────────────────
-  { category: 'Volume', name: 'Lot ID required', field: 'lotId',  type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },
-  { category: 'Volume', name: 'Volume positive',  field: 'volume', type: 'range',         params: { min: 0.001 }, severity: 'warning', builtIn: true, enabled: true },
-  { category: 'Volume', name: 'Date not future',  field: 'date',   type: 'no_future_date', params: {}, severity: 'warning', builtIn: true, enabled: true },
+  // ── Volume (InnoVint template) ───────────────────────────────────────────────
+  { category: 'Volume', name: 'Date required',       field: 'date',       type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },
+  { category: 'Volume', name: 'Lot Code required',   field: 'lotCode',    type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },
+  { category: 'Volume', name: 'Vessel Code required',field: 'vesselCode', type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },
+  { category: 'Volume', name: 'Volume required',     field: 'volume',     type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },
+  { category: 'Volume', name: 'Volume positive',     field: 'volume',     type: 'range',         params: { min: 0.001 }, severity: 'warning', builtIn: true, enabled: true },
+  { category: 'Volume', name: 'Date not future',     field: 'date',       type: 'no_future_date', params: {}, severity: 'warning', builtIn: true, enabled: true },
 
   // ── Historical Additive ─────────────────────────────────────────────────────
   { category: 'Historical Additive', name: 'Target ID required', field: 'targetId', type: 'required',      params: {}, severity: 'error',   builtIn: true, enabled: true },

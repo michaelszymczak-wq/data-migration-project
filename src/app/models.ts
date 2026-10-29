@@ -59,6 +59,11 @@ export interface TargetSchemaField {
   label: string;
   required: boolean;
   type: 'string' | 'number' | 'date';
+  /** Conditionally required: required only when another field in the same row
+   *  equals the given value (e.g. Vessel barrel-only fields). */
+  requiredIf?: { field: string; equals: string };
+  /** Optional helper text shown in the mapping UI. */
+  note?: string;
 }
 
 export interface Mapping {

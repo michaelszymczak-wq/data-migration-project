@@ -7,6 +7,21 @@ interface CoerceResult {
   error?: string;
 }
 
+/**
+ * Whether a field is required for a specific row. True when the field is
+ * unconditionally required, or when its `requiredIf` condition is met by another
+ * value in the same row (e.g. Vessel barrel-only fields when type = Barrel).
+ */
+export function isFieldRequiredForRow(
+  field: TargetSchemaField,
+  rowData: Record<string, unknown>,
+): boolean {
+  if (field.required) return true;
+  if (!field.requiredIf) return false;
+  const controlling = String(rowData[field.requiredIf.field] ?? '').trim().toLowerCase();
+  return controlling === field.requiredIf.equals.toLowerCase();
+}
+
 @Injectable({ providedIn: 'root' })
 export class TransformService {
   private parser = inject(ParseService);
@@ -60,7 +75,7 @@ export class TransformService {
 
       if (!sourceColumn) {
         // Target field has no mapping
-        if (field.required) {
+        if (isFieldRequiredForRow(field, data)) {
           errors.push(`${field.label}: required — not mapped`);
         }
         continue;
@@ -70,7 +85,7 @@ export class TransformService {
 
       // Empty / missing source value
       if (rawValue === null || rawValue === undefined || rawValue === '') {
-        if (field.required) {
+        if (isFieldRequiredForRow(field, data)) {
           errors.push(`${field.label}: required — source column "${sourceColumn}" is empty`);
         }
         data[field.key] = null;
