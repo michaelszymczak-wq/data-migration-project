@@ -57,12 +57,15 @@ interface MappingRow {
     <!-- ── Mapping table ───────────────────────────────────────────────────── -->
     <table mat-table [dataSource]="rows" class="editor-table">
 
-      <!-- Required star -->
+      <!-- Required star / conditional marker -->
       <ng-container matColumnDef="req">
         <th mat-header-cell *matHeaderCellDef></th>
         <td mat-cell *matCellDef="let row">
           @if (row.field.required) {
             <span class="req-star" matTooltip="Required field">★</span>
+          } @else if (row.field.requiredIf) {
+            <span class="req-cond"
+                  [matTooltip]="'Required if ' + row.field.requiredIf.field + ' = ' + row.field.requiredIf.equals">◆</span>
           }
         </td>
       </ng-container>
@@ -74,6 +77,9 @@ interface MappingRow {
             [class.cell-error]="row.field.required && !row.sourceColumn">
           <span class="field-label">{{ row.field.label }}</span>
           <code class="field-key">{{ row.field.key }}</code>
+          @if (row.field.note) {
+            <span class="field-note">{{ row.field.note }}</span>
+          }
         </td>
       </ng-container>
 
@@ -151,6 +157,7 @@ interface MappingRow {
     .editor-table { width: 100%; }
 
     .req-star { color: #e53935; font-size: 14px; }
+    .req-cond { color: #f9a825; font-size: 12px; cursor: help; }
 
     .field-label {
       display: block;
@@ -162,6 +169,13 @@ interface MappingRow {
       display: block;
       font-size: 11px;
       color: rgba(0,0,0,0.4);
+    }
+
+    .field-note {
+      display: block;
+      font-size: 11px;
+      font-style: italic;
+      color: #b08900;
     }
 
     .source-select { min-width: 200px; font-size: 13px; }
