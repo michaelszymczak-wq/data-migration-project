@@ -1,17 +1,23 @@
 import { Component, inject, signal, effect } from '@angular/core';
 import { CommonModule, DatePipe, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
 
 import { WorkspaceService } from '../../services/workspace.service';
 import { LocalDbService } from '../../services/local-db.service';
 import { ToastService } from '../../services/toast.service';
 import { WorkflowStatusService } from '../../services/workflow-status.service';
 import { CATEGORY_RULES } from '../../services/classifier.service';
+import { AiSettingsService, AI_MODELS } from '../../services/ai-settings.service';
+import { ClaudeService, describeClaudeError } from '../../services/claude.service';
 
 interface WsSummary {
   fileCount: number;
@@ -24,9 +30,10 @@ interface WsSummary {
   selector: 'app-settings',
   standalone: true,
   imports: [
-    CommonModule, DatePipe, DecimalPipe, RouterLink,
+    CommonModule, DatePipe, DecimalPipe, RouterLink, FormsModule,
     MatIconModule, MatButtonModule, MatExpansionModule,
     MatDividerModule, MatProgressSpinnerModule,
+    MatFormFieldModule, MatInputModule, MatSelectModule,
   ],
   styles: [`
     .settings-grid { display: flex; flex-direction: column; gap: 28px; }
@@ -138,6 +145,22 @@ interface WsSummary {
       padding: 40px; text-align: center; color: #888;
       border: 1px dashed #e0e0e0; border-radius: 10px;
     }
+
+    /* ── AI card ──────────────────────────────────────────────── */
+    .ai-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+    .ai-key-field { flex: 1; min-width: 280px; }
+    .ai-model-field { min-width: 220px; }
+    .ai-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
+    .ai-note {
+      display: flex; gap: 8px; align-items: flex-start;
+      margin-top: 14px; padding: 10px 12px;
+      background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px;
+      font-size: 12px; color: #8d6e00;
+      mat-icon { font-size: 18px; width: 18px; height: 18px; color: #f9a825; }
+    }
+    .ai-status { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    .ai-status.ok  { color: #2e7d32; }
+    .ai-status.bad { color: #c62828; }
   `],
   template: `
     <div class="page-container">
@@ -147,6 +170,70 @@ interface WsSummary {
       </div>
 
       <div class="settings-grid">
+
+        <!-- ── AI Assistant (Claude) ──────────────────────────── -->
+        <div class="card">
+          <div class="card-header">
+            <mat-icon>smart_toy</mat-icon>
+            AI Assistant (Claude)
+          </div>
+          <div class="card-body">
+            <p style="margin:0 0 16px;font-size:13px;color:#666">
+              Add your Anthropic API key to let Claude suggest column mappings and clean up
+              values on the Mapping page. Get a key at
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+            </p>
+
+            <div class="ai-row">
+              <mat-form-field appearance="outline" class="ai-key-field">
+                <mat-label>Claude API key</mat-label>
+                <input matInput type="password" [(ngModel)]="keyDraft"
+                       placeholder="sk-ant-…" autocomplete="off" />
+                <mat-icon matSuffix>key</mat-icon>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="ai-model-field">
+                <mat-label>Model</mat-label>
+                <mat-select [value]="ai.model()" (valueChange)="ai.setModel($event)">
+                  @for (m of models; track m.id) {
+                    <mat-option [value]="m.id">{{ m.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+
+            <div class="ai-actions">
+              <button mat-flat-button color="primary" (click)="saveKey()">
+                <mat-icon>save</mat-icon> Save key
+              </button>
+              <button mat-stroked-button
+                      [disabled]="!ai.hasKey() || testing()"
+                      (click)="testConnection()">
+                @if (testing()) {
+                  <mat-spinner diameter="16" style="display:inline-block;margin-right:6px" />
+                  Testing…
+                } @else {
+                  <mat-icon>wifi_tethering</mat-icon> Test connection
+                }
+              </button>
+              @if (ai.hasKey()) {
+                <button mat-button (click)="clearKey()">Remove key</button>
+              }
+              @if (testStatus() === 'ok') {
+                <span class="ai-status ok"><mat-icon>check_circle</mat-icon> Connected</span>
+              }
+              @if (testStatus() === 'bad') {
+                <span class="ai-status bad"><mat-icon>error_outline</mat-icon> Failed</span>
+              }
+            </div>
+
+            <div class="ai-note">
+              <mat-icon>warning_amber</mat-icon>
+              <span>Your key is stored in this browser and sent directly to Anthropic from this page.
+                Use only on your own machine — don't enter it on a shared or deployed instance.</span>
+            </div>
+          </div>
+        </div>
 
         <!-- ── Current workspace ──────────────────────────────── -->
         @if (ws.activeWorkspace(); as active) {
@@ -362,12 +449,20 @@ export class SettingsComponent {
   private db       = inject(LocalDbService);
   private toast    = inject(ToastService);
   private wfStatus = inject(WorkflowStatusService);
+  readonly ai      = inject(AiSettingsService);
+  private claude   = inject(ClaudeService);
 
   readonly rules = CATEGORY_RULES;
+  readonly models = AI_MODELS;
 
   resetting = signal(false);
   clearing  = signal(false);
   summary   = signal({ fileCount: 0, classifiedCount: 0, mappingCount: 0, stagedCount: 0 });
+
+  // AI card state
+  keyDraft   = this.ai.apiKey();
+  testing    = signal(false);
+  testStatus = signal<'ok' | 'bad' | null>(null);
 
   constructor() {
     effect(() => {
@@ -414,5 +509,35 @@ export class SettingsComponent {
     this.ws.setActive(null);
     this.clearing.set(false);
     this.toast.info('All local data cleared.');
+  }
+
+  // ── AI assistant ─────────────────────────────────────────────────────────────
+
+  saveKey(): void {
+    this.ai.setApiKey(this.keyDraft);
+    this.testStatus.set(null);
+    this.toast.success(this.ai.hasKey() ? 'Claude API key saved.' : 'Claude API key removed.');
+  }
+
+  clearKey(): void {
+    this.keyDraft = '';
+    this.ai.setApiKey('');
+    this.testStatus.set(null);
+    this.toast.info('Claude API key removed.');
+  }
+
+  async testConnection(): Promise<void> {
+    this.testing.set(true);
+    this.testStatus.set(null);
+    try {
+      await this.claude.testConnection();
+      this.testStatus.set('ok');
+      this.toast.success('Connected to Claude successfully.');
+    } catch (err) {
+      this.testStatus.set('bad');
+      this.toast.error(describeClaudeError(err));
+    } finally {
+      this.testing.set(false);
+    }
   }
 }
